@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traffic Risk Agent</title>
+<style>
+:root{--bg:#0f1419;--card:#18202a;--bd:#2a3644;--tx:#e6edf3;--mu:#8b98a5;--g:#2ea043;--a:#d29922;--r:#f85149;--ac:#58a6ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px system-ui,sans-serif}
+header{padding:16px 24px;border-bottom:1px solid var(--bd);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}h2{font-size:14px;margin:0 0 10px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+main{padding:20px 24px;display:grid;gap:16px;max-width:1300px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button{background:var(--ac);color:#04121f;border:0;border-radius:6px;padding:7px 14px;font-weight:600;cursor:pointer}
+button.sec{background:#263241;color:var(--tx)}button:disabled{opacity:.5;cursor:wait}
+input[type=number]{width:80px;background:#0f1419;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px}
+.clock{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+.z{border:2px solid var(--bd);border-radius:8px;padding:10px;cursor:pointer;background:#131a22}
+.z.GREEN{border-color:var(--g)}.z.AMBER{border-color:var(--a)}.z.RED{border-color:var(--r);background:#2a1618}
+.z.sel{outline:2px solid var(--ac)}.z b{font-size:20px}.mu{color:var(--mu);font-size:12px}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#0f1419;margin:6px 0}
+.badge{font-size:11px;border-radius:4px;padding:1px 6px;font-weight:700}
+.b-on{background:var(--r);color:#fff}.b-off{background:#263241;color:var(--mu)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){.two{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--bd)}th{color:var(--mu)}
+.scroll{max-height:260px;overflow:auto}svg{width:100%;height:180px;background:#0f1419;border-radius:6px}
+.cmp td:nth-child(n+2),.cmp th:nth-child(n+2){text-align:right}.win{color:var(--g);font-weight:700}
+.legend span{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px}
+</style></head><body>
+<header><h1>Agent-Based Traffic Risk Assessment</h1>
+<div class="row"><span class="mu">Simulated hour</span><span class="clock" id="clock">--:--</span><span id="tag" class="badge b-off"></span></div></header>
+<main>
+<section class="card"><h2>Live city · 10 zones</h2>
+<div class="row" style="margin-bottom:10px">
+<button id="play">▶ Play</button><button class="sec" id="step">Step +1h</button><button class="sec" id="reset">Reset</button>
+<label class="mu">Speed <input id="speed" type="range" min="100" max="1500" value="700"></label>
+<span class="legend mu"><span style="background:var(--g)"></span>GREEN &lt;0.40<span style="background:var(--a)"></span>AMBER 0.40–0.60<span style="background:var(--r)"></span>RED ≥0.60</span></div>
+<div class="grid" id="grid"></div></section>
+<div class="two">
+<section class="card"><h2>Why this score? <span id="selname" class="mu"></span></h2><div id="explain" class="mu">Click a zone to see each feature's contribution to R.</div></section>
+<section class="card"><h2>Alert log (rule-based, latest first)</h2><div class="scroll"><table><thead><tr><th>Ep</th><th>Hr</th><th>Zone</th><th>R</th><th>Weather</th><th>Dens</th><th>Night</th><th>Time</th></tr></thead><tbody id="log"></tbody></table></div><div id="sum" class="mu" style="margin-top:8px"></div></section></div>
+<div class="two">
+<section class="card"><h2>RL training</h2>
+<div class="row"><label class="mu">Episodes <input type="number" id="eps" value="700" min="10" max="1500"></label><button id="train">Train agent</button><span id="tstat" class="mu"></span></div>
+<svg id="curve" viewBox="0 0 600 180" preserveAspectRatio="none" style="margin-top:10px"></svg>
+<div class="mu">Episode reward (faint) and 20-episode moving average</div></section>
+<section class="card"><h2>Rule-based vs RL</h2>
+<div class="row"><label class="mu">Test episodes <input type="number" id="eev" value="10" min="1" max="100"></label><button id="eval" class="sec">Evaluate</button></div>
+<div id="cmp" class="mu" style="margin-top:10px">Train the agent, then evaluate.</div></section></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);let timer=null,zones=[],sel=null;
+const api=async(p,b)=>{const r=await fetch('/api/'+p,{method:b?'POST':(p==='status'?'GET':'POST'),headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});return r.json()};
+const COL={density_contrib:'#58a6ff',weather_contrib:'#a371f7',time_contrib:'#d29922',history_contrib:'#3fb950',night_contrib:'#8b949e'};
+const NAME={density_contrib:'Density',weather_contrib:'Weather',time_contrib:'Peak hour',history_contrib:'History',night_contrib:'Night'};
+const PEAK=[10,11,12,17,18];
+function render(){
+ $('grid').innerHTML=zones.map(z=>{const bd=z.breakdown;
+  const bar=Object.keys(bd).map(k=>`<div style="width:${bd[k]*100}%;background:${COL[k]}"></div>`).join('');
+  const rl=z.rl_alert===null?'':`<span class="badge ${z.rl_alert?'b-on':'b-off'}">RL ${z.rl_alert?'ALERT':'ok'}</span>`;
+  return `<div class="z ${z.level} ${sel===z.zone_id?'sel':''}" onclick="pick(${z.zone_id})"><div class="mu">Zone ${z.zone_id} ${z.is_night?'🌙':''}</div><b>${z.risk_score.toFixed(3)}</b>
+  <div class="bar">${bar}</div><div class="mu">${z.weather} · d=${z.density}</div>
+  <div style="margin-top:4px"><span class="badge ${z.rule_alert?'b-on':'b-off'}">Rule ${z.rule_alert?'ALERT':'ok'}</span> ${rl}</div></div>`}).join('');
+ const z=zones.find(x=>x.zone_id===sel);
+ if(z){$('selname').textContent='— Zone '+z.zone_id;const bd=z.breakdown;
+  $('explain').innerHTML=`<div>R = <b>${z.risk_score.toFixed(3)}</b> → <b>${z.level}</b>${z.true_danger?' · ground truth: dangerous (R*>0.45)':''}</div>`+
+  Object.keys(bd).map(k=>`<div class="row" style="margin-top:6px"><span style="width:80px">${NAME[k]}</span><div class="bar" style="flex:1;margin:0"><div style="width:${bd[k]/0.4*100}%;background:${COL[k]}"></div></div><span style="width:50px;text-align:right">${bd[k].toFixed(3)}</span></div>`).join('')+
+  `<div class="mu" style="margin-top:8px">Inputs: density ${z.density}, weather ${z.weather}, peak ${z.time_flag}, history ${z.history}, night ${z.is_night}</div>`}
+}
+window.pick=id=>{sel=id;render()};
+async function step(){const d=await api('step',{});zones=d.zones;
+ $('clock').textContent=String(d.hour).padStart(2,'0')+':00';
+ const t=$('tag');t.textContent=PEAK.includes(d.hour)?'PEAK':(d.hour>=20||d.hour<=6?'NIGHT':'OFF-PEAK');t.className='badge '+(PEAK.includes(d.hour)?'b-on':'b-off');
+ $('log').innerHTML=d.alert_log.map(a=>`<tr><td>${a.episode}</td><td>${a.hour}</td><td>${a.zone_id}</td><td>${a.risk_score}</td><td>${a.weather}</td><td>${a.density}</td><td>${a.is_night?'yes':'no'}</td><td>${a.timestamp.slice(11)}</td></tr>`).join('');
+ const s=d.summary;$('sum').textContent=typeof s==='string'?s:`Total ${s.total_alerts} · day ${s.day_alerts} · night ${s.night_alerts} · busiest zone ${s.most_alerted_zone} · busiest hour ${s.most_alerted_hour}:00`;
+ if(sel===null)sel=1;render()}
+function play(on){clearInterval(timer);timer=null;$('play').textContent='▶ Play';if(on){$('play').textContent='⏸ Pause';timer=setInterval(step,+$('speed').value)}}
+$('play').onclick=()=>play(!timer);$('step').onclick=step;
+$('speed').oninput=()=>{if(timer)play(true)};
+$('reset').onclick=async()=>{play(false);await api('reset',{});$('log').innerHTML='';$('sum').textContent='';$('clock').textContent='--:--'};
+function curve(r){const W=600,H=180,n=r.length,lo=Math.min(...r),hi=Math.max(...r),sp=(hi-lo)||1;
+ const X=i=>i/(n-1)*W,Y=v=>H-8-(v-lo)/sp*(H-16);
+ const ma=r.map((_,i)=>{const s=r.slice(Math.max(0,i-19),i+1);return s.reduce((a,b)=>a+b,0)/s.length});
+ const pl=(a,c,w,o)=>`<polyline fill="none" stroke="${c}" stroke-width="${w}" opacity="${o}" points="${a.map((v,i)=>X(i)+','+Y(v)).join(' ')}"/>`;
+ $('curve').innerHTML=pl(r,'#58a6ff',1,.35)+pl(ma,'#3fb950',2,1)+`<text x="6" y="14" fill="#8b98a5" font-size="11">${hi.toFixed(0)}</text><text x="6" y="${H-2}" fill="#8b98a5" font-size="11">${lo.toFixed(0)}</text>`}
+$('train').onclick=async()=>{const b=$('train');b.disabled=true;$('tstat').textContent='Training… this can take a minute';
+ const t=await api('train',{episodes:+$('eps').value});b.disabled=false;
+ const r=t.reward_history,m=n=>r.slice(0,n).reduce((a,b)=>a+b,0)/Math.min(n,r.length),e=r.slice(-50).reduce((a,b)=>a+b,0)/Math.min(50,r.length);
+ $('tstat').textContent=`${t.episodes} episodes · Q-states ${t.q_states} · ε≈${t.epsilon_final.toFixed(3)} · avg reward ${m(50).toFixed(0)} → ${e.toFixed(0)}`;curve(r)};
+$('eval').onclick=async()=>{const d=await api('evaluate',{episodes:+$('eev').value});if(d.error){$('cmp').textContent=d.error;return}
+ const f=(a,b,k)=>`<td class="${a[k]>b[k]?'win':''}">${a[k].toFixed(2)}%</td>`;const R=d.rule,L=d.rl,B=d.blind_spot;
+ $('cmp').innerHTML=`<table class="cmp"><tr><th>Metric</th><th>Rule</th><th>RL</th></tr>
+ <tr><td>Alerts</td><td>${R.alerts}</td><td>${L.alerts}</td></tr><tr><td>Correct (TP)</td><td>${R.tp}</td><td>${L.tp}</td></tr>
+ <tr><td>False alarms (FP)</td><td>${R.fp}</td><td>${L.fp}</td></tr><tr><td>Missed (FN)</td><td>${R.fn}</td><td>${L.fn}</td></tr>
+ <tr><td>Precision</td>${f(R,L,'precision')}${f(L,R,'precision')}</tr><tr><td>Recall</td>${f(R,L,'recall')}${f(L,R,'recall')}</tr><tr><td>F1</td>${f(R,L,'f1')}${f(L,R,'f1')}</tr></table>
+ <div style="margin-top:8px">Blind spot (dangerous, 0.45&lt;R≤0.60): <b>${B.total}</b> zones · rule caught <b>${B.rule_caught}</b> · RL caught <b>${B.rl_caught}</b></div>
+ <div class="mu">${d.decisions} decisions, ${d.dangerous} truly dangerous</div>`};
+api('status').then(s=>{if(s.trained&&s.training){curve(s.training.reward_history)}});
+</script></body></html>

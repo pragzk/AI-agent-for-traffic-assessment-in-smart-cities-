@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Traffic Risk Agent · NEXUS</title>
+<meta name="description" content="Agent-based traffic risk assessment dashboard. Live simulation, RL training and rule vs RL comparison.">
+<style>
+/* ── Tokens ──────────────────────────────────────────────────────────── */
+:root{
+  --bg:#0b0f14; --bg2:#0f1419; --card:#161c24; --card2:#1c2430;
+  --bd:#232d38; --bd2:#1e2730;
+  --tx:#e2eaf3; --mu:#7d8fa3; --mu2:#536070;
+  --g:#2ea043; --g-dim:#1a4a25; --g-glow:rgba(46,160,67,.18);
+  --a:#d29922; --a-dim:#6b4e0a; --a-glow:rgba(210,153,34,.18);
+  --r:#f85149; --r-dim:#5c1a18; --r-glow:rgba(248,81,73,.2);
+  --ac:#58a6ff; --pu:#a371f7; --gr:#3fb950; --gy:#8b949e;
+  /* feature-bar colours */
+  --cd:#58a6ff; --cw:#a371f7; --ct:#d29922; --ch:#3fb950; --cn:#8b949e;
+}
+/* ── Reset ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--tx);font:14px/1.55 system-ui,-apple-system,sans-serif;min-height:100vh}
+/* ── Typography ──────────────────────────────────────────────────────── */
+h2{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mu);margin-bottom:12px}
+b{font-weight:700}
+/* ── Header ──────────────────────────────────────────────────────────── */
+header{
+  position:sticky;top:0;z-index:200;
+  background:rgba(22,28,36,.94);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--bd2);
+  padding:11px 20px;
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+}
+.logo{font-size:15px;font-weight:800;letter-spacing:-.02em}
+.logo em{font-style:normal;color:var(--ac)}
+.clock{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1}
+.hdr-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* ── Animations ──────────────────────────────────────────────────────── */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* ── Status dot ──────────────────────────────────────────────────────── */
+.dot{width:7px;height:7px;border-radius:50%;background:var(--mu2);flex-shrink:0;transition:background .4s}
+.dot.live{background:var(--gr);animation:pulse 2.2s infinite}
+/* ── Badges ──────────────────────────────────────────────────────────── */
+.badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;
+  border-radius:4px;padding:2px 7px;white-space:nowrap}
+.bd-off{background:var(--card2);color:var(--mu)}
+.bd-alert{background:var(--r-dim);color:var(--r)}
+.bd-ok{background:var(--g-dim);color:var(--g)}
+.bd-peak{background:var(--a-dim);color:var(--a)}
+.bd-night{background:#1a2240;color:#93c5fd}
+.bd-ac{background:#0d2040;color:var(--ac)}
+/* ── Layout ──────────────────────────────────────────────────────────── */
+main{max-width:1340px;margin:0 auto;padding:18px 16px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--card);border:1px solid var(--bd2);border-radius:12px;padding:16px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:780px){.two{grid-template-columns:1fr}}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sec-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap}
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  border:0;border-radius:7px;padding:7px 14px;
+  font-size:13px;font-weight:700;cursor:pointer;
+  transition:opacity .15s,transform .12s,box-shadow .15s;
+  position:relative;white-space:nowrap;
+}
+.btn-pri{background:var(--ac);color:#04121f}
+.btn-sec{background:var(--card2);color:var(--tx);border:1px solid var(--bd)}
+.btn:hover:not(:disabled){opacity:.85;transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.35)}
+.btn:active:not(:disabled){transform:none;box-shadow:none}
+.btn:disabled{opacity:.45;cursor:wait;pointer-events:none}
+/* Spinner inside button */
+.spin{display:none;width:13px;height:13px;border:2px solid currentColor;border-top-color:transparent;
+  border-radius:50%;animation:spin .55s linear infinite;flex-shrink:0}
+.btn.loading .spin{display:block}
+.btn.loading .lbl{opacity:.7}
+/* ── Inputs ──────────────────────────────────────────────────────────── */
+input[type=number]{
+  width:78px;background:var(--bg2);color:var(--tx);
+  border:1px solid var(--bd);border-radius:6px;padding:5px 8px;font-size:13px;
+}
+input[type=range]{accent-color:var(--ac);cursor:pointer;width:86px}
+/* ── Legend row ──────────────────────────────────────────────────────── */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11px;color:var(--mu);margin-bottom:12px}
+.leg-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.leg-sep{width:1px;height:14px;background:var(--bd);margin:0 2px}
+.leg-item{display:flex;align-items:center;gap:4px}
+/* ── Zone grid ───────────────────────────────────────────────────────── */
+.zone-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media(max-width:900px){.zone-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:540px){.zone-grid{grid-template-columns:repeat(2,1fr)}}
+.z{
+  border:2px solid var(--bd);border-radius:10px;padding:11px 10px;
+  cursor:pointer;background:#101820;
+  transition:border-color .2s,background .2s,transform .15s,box-shadow .2s;
+}
+.z:hover{transform:translateY(-2px)}
+.z.GREEN{border-color:var(--g)}
+.z.GREEN:hover{box-shadow:0 6px 20px var(--g-glow)}
+.z.AMBER{border-color:var(--a)}
+.z.AMBER:hover{box-shadow:0 6px 20px var(--a-glow)}
+.z.RED{border-color:var(--r);background:#150d10}
+.z.RED:hover{box-shadow:0 6px 20px var(--r-glow)}
+.z.sel{outline:2px solid var(--ac);outline-offset:2px}
+.z-lbl{font-size:11px;color:var(--mu);margin-bottom:3px}
+.z-score{font-size:22px;font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:4px}
+.z-bar{height:7px;border-radius:4px;overflow:hidden;background:var(--bg);display:flex;margin:5px 0}
+.z-seg{height:100%;transition:width .3s ease}
+.z-meta{font-size:11px;color:var(--mu);margin-top:3px}
+.z-badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+/* ── Explainer ───────────────────────────────────────────────────────── */
+#explain{font-size:13px;min-height:80px}
+.cr{display:flex;align-items:center;gap:8px;margin-top:7px}
+.cr-lbl{width:68px;font-size:11.5px;color:var(--mu);flex-shrink:0}
+.cr-track{flex:1;background:var(--bg);height:8px;border-radius:4px;overflow:hidden}
+.cr-fill{height:100%;border-radius:4px;transition:width .35s ease}
+.cr-val{width:40px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+/* ── Alert log ───────────────────────────────────────────────────────── */
+.scroll{max-height:230px;overflow-y:auto;border-radius:6px}
+.scroll::-webkit-scrollbar{width:4px}
+.scroll::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--mu);padding:5px 6px;border-bottom:1px solid var(--bd2);
+  position:sticky;top:0;background:var(--card);white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px solid var(--bd2);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.025)}
+/* ── Timeline SVG ────────────────────────────────────────────────────── */
+#timeline{width:100%;height:148px;display:block;border-radius:8px;overflow:visible}
+/* ── Reward curve ────────────────────────────────────────────────────── */
+#curve{width:100%;height:148px;background:#0b0f14;border-radius:8px;display:block;margin-top:10px}
+/* ── Eval / comparison ───────────────────────────────────────────────── */
+.cmp td:nth-child(n+2),.cmp th:nth-child(n+2){text-align:right}
+.win{color:var(--gr);font-weight:700}
+.blind-row{display:flex;align-items:center;gap:8px;font-size:12px;margin-top:7px}
+.blind-lbl{width:36px;color:var(--mu);flex-shrink:0}
+.blind-track{flex:1;background:var(--bg);height:10px;border-radius:5px;overflow:hidden}
+.blind-fill{height:100%;border-radius:5px;transition:width .6s ease}
+.blind-pct{width:36px;text-align:right;font-size:11px;color:var(--mu)}
+/* ── Error toast ─────────────────────────────────────────────────────── */
+#err-toast{
+  display:none;position:fixed;bottom:20px;right:20px;z-index:999;
+  background:#280c0b;border:1px solid var(--r);color:#fca5a5;
+  border-radius:10px;padding:13px 16px;max-width:340px;font-size:13px;
+  box-shadow:0 8px 30px rgba(0,0,0,.6);animation:fadein .25s ease;
+}
+#err-toast.show{display:block}
+#err-toast .close-btn{float:right;background:none;border:none;color:#fca5a5;
+  cursor:pointer;font-size:16px;margin:-2px -4px 0 12px;line-height:1}
+/* ── PEAS / About ────────────────────────────────────────────────────── */
+.peas-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+@media(max-width:820px){.peas-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:440px){.peas-grid{grid-template-columns:1fr}}
+.peas-card{background:var(--bg2);border:1px solid var(--bd2);border-radius:10px;padding:14px}
+.peas-icon{font-size:24px;margin-bottom:8px}
+.peas-cat{font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--ac);margin-bottom:4px}
+.peas-title{font-size:14px;font-weight:700;margin-bottom:6px}
+.peas-body{font-size:12px;color:var(--mu);line-height:1.65}
+details>summary{cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;justify-content:space-between}
+details>summary::-webkit-details-marker{display:none}
+.sum-arrow{font-size:12px;color:var(--mu);transition:transform .2s}
+details[open] .sum-arrow{transform:rotate(180deg)}
+hr.div{border:none;border-top:1px solid var(--bd2);margin:13px 0}
+/* ── Misc utils ──────────────────────────────────────────────────────── */
+.mu{color:var(--mu)}
+.pill{background:var(--card2);border:1px solid var(--bd);border-radius:20px;padding:2px 10px;font-size:11px;color:var(--mu)}
+.tx-g{color:var(--gr)} .tx-r{color:var(--r)} .tx-a{color:var(--a)} .tx-ac{color:var(--ac)}
+</style>
+</head>
+<body>
+
+<!-- ── Error toast ──────────────────────────────────────────────────── -->
+<div id="err-toast">
+  <button class="close-btn" onclick="closeErr()" title="Dismiss">✕</button>
+  <b>⚠ Error</b><br>
+  <span id="err-msg">Server unreachable.</span>
+</div>
+
+<!-- ── Header ──────────────────────────────────────────────────────── -->
+<header>
+  <div class="row" style="gap:14px">
+    <span class="logo">Traffic<em>Risk</em> · NEXUS</span>
+    <div class="row" style="gap:6px">
+      <span class="mu" style="font-size:12px">Hour</span>
+      <span class="clock" id="clock">--:--</span>
+      <span id="tag" class="badge bd-off"></span>
+    </div>
+  </div>
+  <div class="hdr-r">
+    <div class="dot" id="srv-dot"></div>
+    <span class="mu" style="font-size:11px" id="srv-lbl">connecting…</span>
+    <span id="rl-badge" class="badge bd-off">RL untrained</span>
+    <span id="ep-pill" class="pill" style="display:none">ep —</span>
+  </div>
+</header>
+
+<main>
+
+<!-- ── § 1  Live city grid ─────────────────────────────────────────── -->
+<section class="card">
+  <div class="sec-hdr">
+    <h2>Live city · 10 zones</h2>
+    <div class="row" style="gap:6px;font-size:12px;color:var(--mu)">
+      <span id="zone-stats"></span>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="row" style="margin-bottom:12px;gap:6px">
+    <button class="btn btn-pri" id="btn-play"><span class="spin"></span><span class="lbl">▶ Play</span></button>
+    <button class="btn btn-sec" id="btn-step"><span class="lbl">Step +1h</span></button>
+    <button class="btn btn-sec" id="btn-reset"><span class="lbl">↺ Reset</span></button>
+    <label class="row" style="font-size:12px;color:var(--mu);gap:5px">
+      Speed <input id="speed" type="range" min="100" max="2000" value="700">
+      <span id="speed-val" style="min-width:50px">700 ms</span>
+    </label>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--g)"></div>GREEN &lt;0.40</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--a)"></div>AMBER 0.40–0.60</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--r)"></div>RED ≥0.60</div>
+    <div class="leg-sep"></div>
+    <span class="mu" style="font-size:11px">Feature bars:</span>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--cd)"></div>Density</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--cw)"></div>Weather</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--ct)"></div>Peak hr</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--ch)"></div>History</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--cn)"></div>Night</div>
+  </div>
+
+  <!-- Cards -->
+  <div class="zone-grid" id="grid"></div>
+</section>
+
+<!-- ── § 2  24-h risk timeline ─────────────────────────────────────── -->
+<section class="card">
+  <div class="sec-hdr">
+    <h2>24-hour mean risk timeline</h2>
+    <button class="btn btn-sec" id="btn-clr-tl" style="font-size:11px;padding:4px 10px"><span class="lbl">Clear</span></button>
+  </div>
+  <svg id="timeline" viewBox="0 0 720 148" preserveAspectRatio="none"></svg>
+  <div class="row" style="margin-top:6px;gap:16px;font-size:11px;color:var(--mu)">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--a);height:3px;border-radius:2px;width:16px"></div>Mean risk/hour</div>
+    <div class="leg-item"><div class="leg-dot" style="background:#1e3060;height:10px;border-radius:2px;width:16px"></div>Peak hours</div>
+    <div class="leg-item"><span style="color:var(--r);font-size:11px">— 0.60</span>&nbsp;alert threshold</div>
+    <div class="leg-item"><span style="color:var(--a);font-size:11px">— 0.45</span>&nbsp;blind-spot boundary</div>
+  </div>
+</section>
+
+<!-- ── § 3  Explainer + Alert log ─────────────────────────────────── -->
+<div class="two">
+  <section class="card">
+    <h2>Feature breakdown <span id="selname" class="mu" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <div id="explain" class="mu" style="font-size:13px">Click a zone card to see each feature's weighted contribution to R.</div>
+  </section>
+
+  <section class="card">
+    <h2>Alert log · rule-based · latest first</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Ep</th><th>Hr</th><th>Zone</th><th>R</th><th>Weather</th><th>Dens</th><th>Night</th><th>Time</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </div>
+    <div id="sum" class="mu" style="margin-top:8px;font-size:11px"></div>
+  </section>
+</div>
+
+<!-- ── § 4  Train + Evaluate ──────────────────────────────────────── -->
+<div class="two">
+  <section class="card">
+    <h2>RL agent training</h2>
+    <div class="row" style="margin-bottom:10px;gap:8px">
+      <label class="row mu" style="font-size:12px;gap:5px">
+        Episodes <input type="number" id="eps" value="200" min="10" max="2000">
+      </label>
+      <button class="btn btn-pri" id="btn-train"><span class="spin"></span><span class="lbl">Train agent</span></button>
+    </div>
+    <div id="tstat" class="mu" style="font-size:12px;min-height:18px"></div>
+    <div id="tprog-wrap" style="display:none;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mu);margin-bottom:4px">
+        <span id="tprog-lbl">Episode 0 / 0</span>
+        <span id="tprog-pct">0%</span>
+      </div>
+      <div style="height:5px;background:var(--card2);border-radius:4px;overflow:hidden">
+        <div id="tprog-bar" style="height:100%;width:0%;background:var(--ac);border-radius:4px;transition:width .35s ease"></div>
+      </div>
+    </div>
+    <svg id="curve" viewBox="0 0 600 148" preserveAspectRatio="none"></svg>
+    <div class="mu" style="font-size:11px;margin-top:6px">
+      Episode reward <span style="color:var(--ac);opacity:.5">▬</span> raw &nbsp;
+      <span style="color:var(--gr)">▬</span> 20-ep moving avg
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Rule-based vs RL evaluation</h2>
+    <div class="row" style="margin-bottom:12px;gap:8px">
+      <label class="row mu" style="font-size:12px;gap:5px">
+        Test episodes <input type="number" id="eev" value="10" min="1" max="100">
+      </label>
+      <button class="btn btn-sec" id="btn-eval"><span class="spin"></span><span class="lbl">Evaluate</span></button>
+    </div>
+    <div id="cmp" class="mu" style="font-size:13px">Train the agent first, then evaluate.</div>
+  </section>
+</div>
+
+<!-- ── § 5  About / PEAS ──────────────────────────────────────────── -->
+<section class="card">
+  <details>
+    <summary>
+      <h2 style="margin:0;display:inline-flex;align-items:center;gap:8px">
+        About · PEAS agent architecture
+      </h2>
+      <span class="sum-arrow">▾</span>
+    </summary>
+    <hr class="div">
+    <p class="mu" style="font-size:13px;max-width:820px;line-height:1.7">
+      This dashboard drives a <b style="color:var(--tx)">rational agent</b> built on the PEAS framework.
+      Ten city zones are evaluated each simulated hour. A <b style="color:var(--tx)">rule-based agent</b>
+      fires alerts when the weighted risk score R ≥ 0.60.
+      A <b style="color:var(--tx)">Q-learning agent</b> (ε-greedy, tabular) learns to catch the
+      <em>blind spot</em> — zones that are truly dangerous (R* &gt; 0.45) yet fall below the rule threshold.
+    </p>
+    <div class="peas-grid">
+      <div class="peas-card">
+        <div class="peas-icon">🌆</div>
+        <div class="peas-cat">Environment</div>
+        <div class="peas-title">CitySimulator</div>
+        <div class="peas-body">10 zones with stochastic density &amp; weather each hour. A deterministic
+          <code style="color:var(--ac)">true_danger</code> label (R* &gt; 0.45) provides ground truth
+          for the RL reward signal.</div>
+      </div>
+      <div class="peas-card">
+        <div class="peas-icon">👁</div>
+        <div class="peas-cat">Percept</div>
+        <div class="peas-title">PerceptionModule</div>
+        <div class="peas-body">Converts raw zone state into a 5-D normalised vector
+          [density, weather_enc, time_flag, hist_risk, is_night].
+          Small Gaussian noise (σ=0.03) applied during training only.</div>
+      </div>
+      <div class="peas-card">
+        <div class="peas-icon">🧠</div>
+        <div class="peas-cat">Decision</div>
+        <div class="peas-title">DecisionModule + RLAgent</div>
+        <div class="peas-body">Rule-based: R = Σ wᵢfᵢ, alert if R &gt; θ = 0.60.
+          RL agent: Q-table over 6-bin discretised percepts (up to 7 776 states);
+          ε decays 1.0 → 0.01 over episodes.</div>
+      </div>
+      <div class="peas-card">
+        <div class="peas-icon">🚨</div>
+        <div class="peas-cat">Action</div>
+        <div class="peas-title">ActionModule</div>
+        <div class="peas-body">Issues alerts, logs events with timestamps, and aggregates precision,
+          recall &amp; F1. RL reward shaping: +15 TP, −15 FN, −8 FP, +2 TN — only selective
+          alerting is profitable.</div>
+      </div>
+    </div>
+  </details>
+</section>
+
+</main>
+
+<!-- ── Script ──────────────────────────────────────────────────────────── -->
+<script>
+'use strict';
+
+/* ── Constants ─────────────────────────────────────────────────────────── */
+const PEAK = new Set([10,11,12,17,18]);
+const BAR_KEYS   = ['density_contrib','weather_contrib','time_contrib','history_contrib','night_contrib'];
+const BAR_COLORS = {density_contrib:'#58a6ff',weather_contrib:'#a371f7',time_contrib:'#d29922',history_contrib:'#3fb950',night_contrib:'#8b949e'};
+const BAR_NAMES  = {density_contrib:'Density',weather_contrib:'Weather',time_contrib:'Peak hr',history_contrib:'History',night_contrib:'Night'};
+
+/* ── State ─────────────────────────────────────────────────────────────── */
+let timer = null, zones = [], sel = null, trained = false;
+const meanRisk = new Array(24).fill(null); // index = hour, value = mean risk that step
+
+/* ── DOM ───────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+/* ── Error toast ────────────────────────────────────────────────────────── */
+let errTimer = null;
+function showErr(msg) {
+  $('err-msg').textContent = msg;
+  $('err-toast').classList.add('show');
+  clearTimeout(errTimer);
+  errTimer = setTimeout(closeErr, 7000);
+}
+function closeErr() { $('err-toast').classList.remove('show'); }
+
+/* ── API ────────────────────────────────────────────────────────────────── */
+async function api(path, body) {
+  const isGet = body === undefined;
+  let res;
+  try {
+    res = await fetch('/api/' + path, {
+      method: isGet ? 'GET' : 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: isGet ? undefined : JSON.stringify(body),
+    });
+  } catch(e) {
+    showErr(`Cannot reach server — is uvicorn running? (${e.message})`);
+    throw e;
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.statusText);
+    showErr(`${path}: HTTP ${res.status} — ${txt.slice(0,120)}`);
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/* ── Button loading state ───────────────────────────────────────────────── */
+function setLoading(btn, on) {
+  btn.disabled = on;
+  btn.classList.toggle('loading', on);
+}
+
+/* ── Status check on boot ───────────────────────────────────────────────── */
+async function checkStatus() {
+  try {
+    const s = await api('status');
+    $('srv-dot').className = 'dot live';
+    $('srv-lbl').textContent = 'connected';
+    if (s.trained && s.training) {
+      trained = true;
+      updateTrainedBadge();
+      const rh = (s.training.reward_history_so_far || s.training.reward_history || []);
+      if (rh.length) drawCurve(rh);
+    }
+  } catch(_) {
+    $('srv-dot').className = 'dot';
+    $('srv-lbl').textContent = 'offline';
+  }
+  // Also check if a training run is already in progress
+  try {
+    const p = await api('train/progress');
+    if (p.running) {
+      const eps = p.total || +$('eps').value || 200;
+      setLoading($('btn-train'), true);
+      $('tstat').textContent = 'Training resuming… watching live progress';
+      $('tprog-wrap').style.display = '';
+      _stopTrainPoll();
+      _trainPollId = setInterval(() => _pollProgress(eps), 500);
+    }
+  } catch(_) {}
+}
+
+function updateTrainedBadge() {
+  const b = $('rl-badge');
+  b.textContent = trained ? 'RL trained ✓' : 'RL untrained';
+  b.className = 'badge ' + (trained ? 'bd-ok' : 'bd-off');
+}
+
+/* ── Simulation step ────────────────────────────────────────────────────── */
+async function doStep() {
+  let d;
+  try { d = await api('step', {}); } catch(_) { return; }
+
+  zones = d.zones;
+  const h = d.hour;
+
+  /* Clock */
+  $('clock').textContent = String(h).padStart(2,'0') + ':00';
+  const isPeak = PEAK.has(h), isNight = (h >= 20 || h <= 6);
+  const tag = $('tag');
+  tag.textContent = isPeak ? 'PEAK' : isNight ? 'NIGHT' : 'OFF-PEAK';
+  tag.className = 'badge ' + (isPeak ? 'bd-peak' : isNight ? 'bd-night' : 'bd-off');
+
+  /* Episode pill */
+  const ep = $('ep-pill');
+  ep.style.display = '';
+  if (d.alert_log && d.alert_log.length) ep.textContent = `ep ${d.alert_log[0].episode}`;
+
+  /* Zone summary */
+  const red   = zones.filter(z => z.level === 'RED').length;
+  const amber = zones.filter(z => z.level === 'AMBER').length;
+  $('zone-stats').innerHTML =
+    `<span class="tx-r">● ${red} RED</span> &nbsp;` +
+    `<span class="tx-a">● ${amber} AMBER</span> &nbsp;` +
+    `<span style="color:var(--g)">● ${10-red-amber} GREEN</span>`;
+
+  /* Alert log */
+  $('log').innerHTML = d.alert_log.map(a =>
+    `<tr>
+      <td>${a.episode}</td><td>${String(a.hour).padStart(2,'0')}</td>
+      <td>Z${a.zone_id}</td>
+      <td><b>${a.risk_score.toFixed ? a.risk_score.toFixed(3) : a.risk_score}</b></td>
+      <td>${a.weather}</td><td>${a.density}</td>
+      <td>${a.is_night ? '🌙' : '—'}</td>
+      <td class="mu">${a.timestamp.slice(11,16)}</td>
+    </tr>`
+  ).join('');
+
+  const s = d.summary;
+  $('sum').textContent = typeof s === 'string' ? s
+    : `Total ${s.total_alerts} alerts · day ${s.day_alerts} · night ${s.night_alerts} · busiest zone ${s.most_alerted_zone} · hour ${s.most_alerted_hour}:00`;
+
+  /* Timeline: record mean risk for this hour */
+  const mean = zones.reduce((acc, z) => acc + z.risk_score, 0) / zones.length;
+  meanRisk[h] = +mean.toFixed(4);
+  drawTimeline(h);
+
+  if (sel === null) sel = 1;
+  renderZones();
+}
+
+/* ── Zone render ────────────────────────────────────────────────────────── */
+function renderZones() {
+  $('grid').innerHTML = zones.map(z => {
+    const bd = z.breakdown || {};
+    const bar = BAR_KEYS.map(k =>
+      `<div class="z-seg" style="width:${((bd[k]||0)*100).toFixed(1)}%;background:${BAR_COLORS[k]}"></div>`
+    ).join('');
+    const rlBadge = z.rl_alert === null ? ''
+      : `<span class="badge ${z.rl_alert ? 'bd-alert' : 'bd-off'}">RL ${z.rl_alert ? 'ALERT' : 'ok'}</span>`;
+    const col = z.level === 'RED' ? 'var(--r)' : z.level === 'AMBER' ? 'var(--a)' : 'var(--g)';
+    return `<div class="z ${z.level}${sel===z.zone_id?' sel':''}" onclick="pick(${z.zone_id})">
+      <div class="z-lbl">Zone ${z.zone_id}${z.is_night?' 🌙':''}</div>
+      <div class="z-score" style="color:${col}">${z.risk_score.toFixed(3)}</div>
+      <div class="z-bar">${bar}</div>
+      <div class="z-meta">${z.weather} · d=${z.density}</div>
+      <div class="z-badges">
+        <span class="badge ${z.rule_alert?'bd-alert':'bd-off'}">Rule ${z.rule_alert?'ALERT':'ok'}</span>
+        ${rlBadge}
+        ${z.true_danger?'<span class="badge bd-peak">⚠ danger</span>':''}
+      </div>
+    </div>`;
+  }).join('');
+  renderExplainer();
+}
+
+window.pick = id => { sel = id; renderZones(); };
+
+function renderExplainer() {
+  const z = zones.find(x => x.zone_id === sel);
+  if (!z) return;
+  $('selname').textContent = '— Zone ' + z.zone_id;
+  const bd = z.breakdown || {};
+  const levelCol = z.level==='RED'?'var(--r)':z.level==='AMBER'?'var(--a)':'var(--g)';
+  const dangerNote = z.true_danger
+    ? `<span class="tx-r" style="font-size:11px;font-weight:700"> · ⚠ truly dangerous (R*>0.45)</span>` : '';
+  $('explain').innerHTML =
+    `<div style="margin-bottom:10px;font-size:13px">
+       R = <b style="font-size:18px">${z.risk_score.toFixed(3)}</b>
+       → <b style="color:${levelCol};font-size:13px">${z.level}</b>${dangerNote}
+     </div>` +
+    BAR_KEYS.map(k => {
+      const val = bd[k] || 0;
+      /* max theoretical single-factor contribution is 0.35 (density) */
+      const pct = Math.min(val / 0.36 * 100, 100);
+      return `<div class="cr">
+        <span class="cr-lbl">${BAR_NAMES[k]}</span>
+        <div class="cr-track">
+          <div class="cr-fill" style="width:${pct.toFixed(1)}%;background:${BAR_COLORS[k]}"></div>
+        </div>
+        <span class="cr-val" style="color:${BAR_COLORS[k]}">${val.toFixed(3)}</span>
+      </div>`;
+    }).join('') +
+    `<div class="mu" style="margin-top:10px;font-size:11px">
+       density ${z.density} · weather ${z.weather} · peak ${z.time_flag} · hist ${z.history} · night ${z.is_night}
+     </div>`;
+}
+
+/* ── 24-h Timeline (SVG) ────────────────────────────────────────────────── */
+function drawTimeline(curH) {
+  const W=720, H=148, PL=38, PR=28, PT=10, PB=26;
+  const cW = W-PL-PR, cH = H-PT-PB;
+  const xOf = i => PL + (i/23)*cW;
+  const yOf = v => PT + cH - v*cH;
+  const parts = [];
+
+  /* Peak-hour shading */
+  [[9.5,12.5],[16.5,18.5]].forEach(([s,e]) => {
+    const x1=xOf(Math.max(s,0)), x2=xOf(Math.min(e,23));
+    parts.push(`<rect x="${x1.toFixed(1)}" y="${PT}" width="${(x2-x1).toFixed(1)}" height="${cH}" fill="#1e3060" opacity=".55" rx="2"/>`);
+  });
+
+  /* Grid lines + Y labels */
+  [0,.25,.50,.75,1].forEach(v => {
+    const y = yOf(v).toFixed(1);
+    parts.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="#1e2730" stroke-width="1"/>`);
+    parts.push(`<text x="${PL-4}" y="${(+y+4).toFixed(0)}" fill="#4d5d6e" font-size="9" text-anchor="end">${v.toFixed(2)}</text>`);
+  });
+
+  /* X-axis hour labels */
+  [0,2,4,6,8,10,12,14,16,18,20,22].forEach(h => {
+    parts.push(`<text x="${xOf(h).toFixed(1)}" y="${H-6}" fill="#4d5d6e" font-size="9" text-anchor="middle">${h}</text>`);
+  });
+
+  /* Threshold lines */
+  const y60 = yOf(0.60).toFixed(1);
+  parts.push(`<line x1="${PL}" y1="${y60}" x2="${W-PR}" y2="${y60}" stroke="#f85149" stroke-width="1" stroke-dasharray="5 3" opacity=".6"/>`);
+  parts.push(`<text x="${(W-PR+3)}" y="${(+y60+4).toFixed(0)}" fill="#f85149" font-size="9" opacity=".75">0.60</text>`);
+  const y45 = yOf(0.45).toFixed(1);
+  parts.push(`<line x1="${PL}" y1="${y45}" x2="${W-PR}" y2="${y45}" stroke="#d29922" stroke-width="1" stroke-dasharray="5 3" opacity=".5"/>`);
+  parts.push(`<text x="${(W-PR+3)}" y="${(+y45+4).toFixed(0)}" fill="#d29922" font-size="9" opacity=".7">0.45</text>`);
+
+  /* Data: filled area + polyline */
+  const pts = meanRisk.map((v,i) => v!==null ? {i,v} : null).filter(Boolean);
+  if (pts.length >= 2) {
+    const coordStr = pts.map(p => `${xOf(p.i).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ');
+    const areaD = `M${xOf(pts[0].i).toFixed(1)},${yOf(0)} `+
+      pts.map(p=>`L${xOf(p.i).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ')+
+      ` L${xOf(pts[pts.length-1].i).toFixed(1)},${yOf(0)} Z`;
+    parts.push(`<path d="${areaD}" fill="#d29922" opacity=".1"/>`);
+    parts.push(`<polyline fill="none" stroke="#d29922" stroke-width="2" stroke-linejoin="round" points="${coordStr}"/>`);
+  }
+
+  /* Dots coloured by level */
+  pts.forEach(p => {
+    const cx=xOf(p.i).toFixed(1), cy=yOf(p.v).toFixed(1);
+    const col = p.v>=0.6?'#f85149':p.v>=0.45?'#d29922':'#3fb950';
+    parts.push(`<circle cx="${cx}" cy="${cy}" r="3.5" fill="${col}" stroke="#0b0f14" stroke-width="1.5"/>`);
+  });
+
+  /* Highlight current hour */
+  if (curH !== undefined && meanRisk[curH] !== null) {
+    const cx=xOf(curH).toFixed(1), cy=yOf(meanRisk[curH]).toFixed(1);
+    parts.push(`<circle cx="${cx}" cy="${cy}" r="6" fill="none" stroke="#58a6ff" stroke-width="2" opacity=".8"/>`);
+  }
+
+  $('timeline').innerHTML = parts.join('');
+}
+
+function clearTimeline() { meanRisk.fill(null); drawTimeline(); }
+
+/* ── Reward curve ────────────────────────────────────────────────────────── */
+function drawCurve(rh) {
+  const W=600, H=148, n=rh.length;
+  if (!n) return;
+  const lo=Math.min(...rh), hi=Math.max(...rh), sp=(hi-lo)||1;
+  const X = i => (i/(n-1))*W;
+  const Y = v => H-6-(v-lo)/sp*(H-14);
+  const ma = rh.map((_,i) => {
+    const sl = rh.slice(Math.max(0,i-19),i+1);
+    return sl.reduce((a,b)=>a+b,0)/sl.length;
+  });
+  const poly = (arr, col, w, op) =>
+    `<polyline fill="none" stroke="${col}" stroke-width="${w}" opacity="${op}" stroke-linejoin="round"` +
+    ` points="${arr.map((v,i)=>X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ')}"/>`;
+  $('curve').innerHTML =
+    poly(rh,'#58a6ff',1,.3) + poly(ma,'#3fb950',2,1) +
+    `<text x="5" y="14" fill="#4d5d6e" font-size="10">${hi.toFixed(0)}</text>` +
+    `<text x="5" y="${H-2}" fill="#4d5d6e" font-size="10">${lo.toFixed(0)}</text>`;
+}
+
+/* ── Train ───────────────────────────────────────────────────────────────── */
+let _trainPollId = null;
+
+function _stopTrainPoll() {
+  if (_trainPollId) { clearInterval(_trainPollId); _trainPollId = null; }
+}
+
+async function _pollProgress(eps) {
+  let p;
+  try { p = await api('train/progress'); } catch(_) { return; }
+
+  const frac = eps > 0 ? Math.min(p.episode / eps, 1) : 0;
+  const pct = (frac * 100).toFixed(0);
+  $('tprog-lbl').textContent = `Episode ${p.episode} / ${eps}`;
+  $('tprog-pct').textContent = `${pct}%`;
+  $('tprog-bar').style.width = pct + '%';
+
+  if (p.reward_history_so_far && p.reward_history_so_far.length >= 2) {
+    drawCurve(p.reward_history_so_far);
+  }
+
+  if (!p.running) {
+    _stopTrainPoll();
+    $('tprog-wrap').style.display = 'none';
+    setLoading($('btn-train'), false);
+
+    const rh = p.reward_history_so_far || [];
+    const avgFirst = rh.length ? rh.slice(0,50).reduce((a,b)=>a+b,0) / Math.min(50,rh.length) : 0;
+    const avgLast  = rh.length ? rh.slice(-50).reduce((a,b)=>a+b,0) / Math.min(50,rh.length) : 0;
+    $('tstat').innerHTML =
+      `<span class="tx-g">✓</span> ${p.episode} episodes · Q-states <b>${p.q_states}</b>` +
+      ` · avg reward <span class="mu">${avgFirst.toFixed(0)}</span> → <b class="tx-g">${avgLast.toFixed(0)}</b>`;
+    if (rh.length) drawCurve(rh);
+    trained = true;
+    updateTrainedBadge();
+  }
+}
+
+$('btn-train').addEventListener('click', async () => {
+  const btn = $('btn-train');
+  const eps = Math.max(10, Math.min(+$('eps').value || 200, 2000));
+
+  // POST to start training
+  let res;
+  try {
+    res = await fetch('/api/train', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({episodes: eps}),
+    });
+  } catch(e) {
+    showErr(`Cannot reach server — is uvicorn running? (${e.message})`);
+    return;
+  }
+
+  if (res.status === 409) {
+    $('tstat').innerHTML = `<span class="tx-a">⚠ Training already running — wait for it to finish.</span>`;
+    return;
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.statusText);
+    showErr(`/api/train: HTTP ${res.status} — ${txt.slice(0,120)}`);
+    return;
+  }
+
+  setLoading(btn, true);
+  $('tstat').textContent = 'Training… watching live progress';
+  $('tprog-wrap').style.display = '';
+  $('tprog-bar').style.width = '0%';
+  $('tprog-lbl').textContent = `Episode 0 / ${eps}`;
+  $('tprog-pct').textContent = '0%';
+
+  _stopTrainPoll();
+  _trainPollId = setInterval(() => _pollProgress(eps), 500);
+  _pollProgress(eps); // immediate first tick
+});
+
+/* ── Evaluate ────────────────────────────────────────────────────────────── */
+$('btn-eval').addEventListener('click', async () => {
+  const btn = $('btn-eval');
+  setLoading(btn, true);
+  $('cmp').innerHTML = '<span class="mu">Evaluating…</span>';
+  try {
+    const d = await api('evaluate', {episodes: +$('eev').value});
+    if (d.error) {
+      $('cmp').innerHTML = `<span class="tx-r">⚠ ${d.error}</span>`;
+      return;
+    }
+    const R = d.rule, L = d.rl, B = d.blind_spot;
+
+    /* Helper: returns ['win',''] if rVal wins, ['','win'] if lVal wins */
+    function wc(rn, ln, lowerBetter=false) {
+      if (rn === ln) return ['',''];
+      return (lowerBetter ? rn < ln : rn > ln) ? ['win',''] : ['','win'];
+    }
+
+    const rows = [
+      {label:'Alerts',      rv:R.alerts,    lv:L.alerts,    fmt:v=>v,                 lb:false, noWin:true},
+      {label:'Correct (TP)',rv:R.tp,        lv:L.tp,        fmt:v=>v,                 lb:false},
+      {label:'False alm',   rv:R.fp,        lv:L.fp,        fmt:v=>v,                 lb:true},
+      {label:'Missed (FN)', rv:R.fn,        lv:L.fn,        fmt:v=>v,                 lb:true},
+      {label:'Precision',   rv:R.precision, lv:L.precision, fmt:v=>v.toFixed(2)+'%',  lb:false},
+      {label:'Recall',      rv:R.recall,    lv:L.recall,    fmt:v=>v.toFixed(2)+'%',  lb:false},
+      {label:'F1',          rv:R.f1,        lv:L.f1,        fmt:v=>v.toFixed(2)+'%',  lb:false},
+    ];
+
+    const tBody = rows.map(m => {
+      const [rc,lc] = m.noWin ? ['',''] : wc(m.rv, m.lv, m.lb);
+      return `<tr><td>${m.label}</td><td class="${rc}">${m.fmt(m.rv)}</td><td class="${lc}">${m.fmt(m.lv)}</td></tr>`;
+    }).join('');
+
+    const bTotal = B.total || 0;
+    const rulePct = bTotal ? B.rule_caught/bTotal*100 : 0;
+    const rlPct   = bTotal ? B.rl_caught/bTotal*100   : 0;
+
+    $('cmp').innerHTML = `
+      <table class="cmp" style="margin-bottom:14px;font-size:12px">
+        <thead><tr><th>Metric</th><th style="color:var(--mu)">Rule</th><th style="color:var(--ac)">RL</th></tr></thead>
+        <tbody>${tBody}</tbody>
+      </table>
+      <div class="mu" style="font-size:11px;margin-bottom:4px">
+        Blind-spot catch rate — truly dangerous zones with 0.45 &lt; R ≤ 0.60 (<b>${bTotal}</b> zones):
+      </div>
+      <div class="blind-row">
+        <span class="blind-lbl mu" style="color:var(--mu)">Rule</span>
+        <div class="blind-track">
+          <div class="blind-fill" style="width:${rulePct.toFixed(1)}%;background:var(--a)"></div>
+        </div>
+        <span class="blind-pct">${rulePct.toFixed(0)}%</span>
+      </div>
+      <div class="blind-row">
+        <span class="blind-lbl mu" style="color:var(--ac)">RL</span>
+        <div class="blind-track">
+          <div class="blind-fill" style="width:${rlPct.toFixed(1)}%;background:var(--ac)"></div>
+        </div>
+        <span class="blind-pct">${rlPct.toFixed(0)}%</span>
+      </div>
+      <div class="mu" style="margin-top:10px;font-size:11px">
+        ${d.decisions.toLocaleString()} decisions · ${d.dangerous.toLocaleString()} truly dangerous
+        (${(d.dangerous/d.decisions*100).toFixed(1)}%)
+      </div>`;
+  } catch(_) {
+    $('cmp').innerHTML = `<span class="tx-r">✗ Evaluation failed — check the error toast for details.</span>`;
+  } finally {
+    setLoading(btn, false);
+  }
+});
+
+/* ── Play / Pause ────────────────────────────────────────────────────────── */
+function setPlay(on) {
+  clearInterval(timer); timer = null;
+  $('btn-play').querySelector('.lbl').textContent = '▶ Play';
+  if (on) {
+    $('btn-play').querySelector('.lbl').textContent = '⏸ Pause';
+    timer = setInterval(doStep, +$('speed').value);
+  }
+}
+$('btn-play').addEventListener('click', () => setPlay(!timer));
+$('btn-step').addEventListener('click', doStep);
+$('speed').addEventListener('input', () => {
+  $('speed-val').textContent = $('speed').value + ' ms';
+  if (timer) setPlay(true);
+});
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+$('btn-reset').addEventListener('click', async () => {
+  setPlay(false);
+  try {
+    await api('reset', {});
+    zones = []; sel = null;
+    $('log').innerHTML = '';
+    $('sum').textContent = '';
+    $('clock').textContent = '--:--';
+    $('tag').className = 'badge bd-off'; $('tag').textContent = '';
+    $('grid').innerHTML = '';
+    $('zone-stats').textContent = '';
+    $('ep-pill').style.display = 'none';
+    $('explain').innerHTML = '<span class="mu">Click a zone card to see each feature\'s weighted contribution to R.</span>';
+    $('selname').textContent = '';
+  } catch(_) {}
+});
+
+/* ── Clear timeline ──────────────────────────────────────────────────────── */
+$('btn-clr-tl').addEventListener('click', clearTimeline);
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+drawTimeline();    // draw empty grid immediately
+checkStatus();
+</script>
+</body>
+</html>
